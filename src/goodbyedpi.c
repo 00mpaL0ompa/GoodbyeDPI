@@ -20,6 +20,8 @@
 #include "ttltrack.h"
 #include "blackwhitelist.h"
 #include "fakepackets.h"
+#include "acksplit.h"
+#include "qos.h"
 
 // My mingw installation does not load inet_pton definition for some reason
 WINSOCK_API_LINKAGE INT WSAAPI inet_pton(INT Family, LPCSTR pStringBuf, PVOID pAddr);
@@ -193,6 +195,11 @@ static struct option long_options[] = {
     {"fake-gen",    required_argument, 0,  'j' },
     {"fake-resend", required_argument, 0,  't' },
     {"debug-exit",  optional_argument, 0,  'x' },
+    {"ack-split",      optional_argument, 0,  '&' },
+    {"ack-split-sack", optional_argument, 0,  '^' },
+    {"ack-split-bytes",required_argument, 0,  '~' },
+    {"ack-keep-wscale",no_argument,       0,  '=' },
+    {"qos-dscp",       optional_argument, 0,  '_' },
     {0,             0,                 0,   0  }
 };
 
@@ -617,11 +624,13 @@ int main(int argc, char *argv[]) {
         do_auto_ttl = 0,
         do_wrong_chksum = 0,
         do_wrong_seq = 0,
-        do_native_frag = 0, do_reverse_frag = 0;
+        do_native_frag = 0, do_reverse_frag = 0,
+        do_qos = 0;
     unsigned int http_fragment_size = 0;
     unsigned int https_fragment_size = 0;
     unsigned int current_fragment_size = 0;
     unsigned short max_payload_size = 0;
+    uint8_t qos_dscp = 46;
     BYTE should_send_fake = 0;
     BYTE ttl_of_fake_packet = 0;
     BYTE ttl_min_nhops = 0;
@@ -970,6 +979,30 @@ int main(int argc, char *argv[]) {
                 break;
             case 'x': // --debug-exit
                 debug_exit = true;
+                break;
+            case '&': /* --ack-split [size] */
+            case '^': /* --ack-split-sack [size] */
+                ack_mode = (opt == '&') ? ACK_PLAIN : ACK_SACK;
+                if (!optarg && argv[optind] && argv[optind][0] != '-')
+                    optarg = argv[optind];
+                if (optarg)
+                    ack_step_size = atousi(optarg, "ACK split size parameter error!");
+                if (ack_step_size < 8) {
+                    puts("WARNING: ack-split size < 8 is impractical, using 8");
+                    ack_step_size = 8;
+                }
+                break;
+            case '~':
+                ack_limit_bytes = strtoul(optarg, NULL, 10);
+                break;
+            case '=':
+                ack_zero_wscale = 0;
+                break;
+            case '_': /* --qos-dscp [0-63] */
+                if (!optarg && argv[optind] && argv[optind][0] != '-')
+                    optarg = argv[optind];
+                do_qos = 1;
+                qos_dscp = optarg ? (atoub(optarg, "DSCP parameter error!") & 0x3F) : 46;
                 break;
             default:
                 puts("Usage: goodbyedpi.exe [OPTION...]\n"
