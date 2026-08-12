@@ -1065,6 +1065,11 @@ int main(int argc, char *argv[]) {
                 "                          (like file transfers) in already established sessions.\n"
                 "                          May skip some huge HTTP requests from being processed.\n"
                 "                          Default (if set): --max-payload 1200.\n"
+                " --ack-split     [size]   split incoming ACKs using plain mode (default size: 40 bytes).\n"
+                " --ack-split-sack [size]  split incoming ACKs using SACK mode (default size: 40 bytes).\n"
+                " --ack-split-bytes <N>    limit ACK splitting to first N bytes of response (0 = unlimited).\n"
+                " --ack-keep-wscale        do not zero TCP Window Scale option when ACK splitting is enabled.\n"
+                " --qos-dscp      [0-63]   set DSCP value for QoS marking on outgoing packets (default: 46/EF).\n"
                 "\n");
                 puts("LEGACY modesets:\n"
                 " -1          -p -r -s -f 2 -k 2 -n -e 2 (most compatible mode)\n"
@@ -1165,6 +1170,11 @@ int main(int argc, char *argv[]) {
     finalize_filter_strings();
     puts("\nOpening filter");
     filter_num = 0;
+
+    /* Start QoS marking if enabled */
+    if (do_qos && !qos_start(qos_dscp)) {
+        puts("WARNING: Failed to start QoS marking!");
+    }
 
     if (do_passivedpi) {
         /* IPv4 only filter for inbound RST packets with ID [0x0; 0xF] */
@@ -1472,6 +1482,13 @@ int main(int argc, char *argv[]) {
                 }
             } /* Handle TCP packet with data */
 
+            /* Handle ACK splitting for incoming TCP data packets */
+            if (packet_type == ipv4_tcp_data || packet_type == ipv6_tcp_data) {
+                if (!addr.Outbound && ack_mode != ACK_OFF) {
+                    acksplit_in_data(w_filter, &addr, ppIpHdr, ppIpV6Hdr, ppTcpHdr, packet_dataLen);
+                }
+            }
+
             /* Else if we got TCP packet without data */
             else if (packet_type == ipv4_tcp || packet_type == ipv6_tcp) {
                 /* If we got INBOUND SYN+ACK packet */
@@ -1508,6 +1525,16 @@ int main(int argc, char *argv[]) {
                             should_recalc_checksum = 1;
                         }
                     }
+                }
+                /* Handle ACK splitting for outbound SYN packets */
+                else if (addr.Outbound && ppTcpHdr->Syn == 1 && !ppTcpHdr->Ack) {
+                    int recalc = 0;
+                    if (packet_v4)
+                        acksplit_out_syn(ppTcpHdr, (uint32_t*)&ppIpHdr->SrcAddr, (uint32_t*)&ppIpHdr->DstAddr, 0, &recalc);
+                    else if (packet_v6)
+                        acksplit_out_syn(ppTcpHdr, (uint32_t*)ppIpV6Hdr->SrcAddr, (uint32_t*)ppIpV6Hdr->DstAddr, 1, &recalc);
+                    if (recalc)
+                        should_recalc_checksum = 1;
                 }
             }
 
@@ -1580,10 +1607,32 @@ int main(int argc, char *argv[]) {
 
             if (should_reinject) {
                 //printf("Re-injecting!\n");
-                if (should_recalc_checksum) {
-                    WinDivertHelperCalcChecksums(packet, packetLen, &addr, (UINT64)0LL);
+                /* Handle ACK splitting for outgoing TCP packets */
+                if ((packet_type == ipv4_tcp || packet_type == ipv6_tcp ||
+                     packet_type == ipv4_tcp_data || packet_type == ipv6_tcp_data) &&
+                    ack_mode != ACK_OFF && addr.Outbound && ppTcpHdr) {
+                    int recalc = 0;
+                    uint32_t *srcip, *dstip;
+                    if (packet_v4) {
+                        srcip = (uint32_t*)&ppIpHdr->SrcAddr;
+                        dstip = (uint32_t*)&ppIpHdr->DstAddr;
+                    }
+                    else {
+                        srcip = (uint32_t*)ppIpV6Hdr->SrcAddr;
+                        dstip = (uint32_t*)ppIpV6Hdr->DstAddr;
+                    }
+                    if (!acksplit_out(ppTcpHdr, srcip, dstip, packet_v6, packet_dataLen ? packet_dataLen : 0, &recalc)) {
+                        should_reinject = 0;
+                    }
+                    if (recalc)
+                        should_recalc_checksum = 1;
                 }
-                WinDivertSend(w_filter, packet, packetLen, NULL, &addr);
+                if (should_reinject) {
+                    if (should_recalc_checksum) {
+                        WinDivertHelperCalcChecksums(packet, packetLen, &addr, (UINT64)0LL);
+                    }
+                    WinDivertSend(w_filter, packet, packetLen, NULL, &addr);
+                }
             }
         }
         else {
