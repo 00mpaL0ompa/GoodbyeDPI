@@ -1,7 +1,11 @@
 ```
-# Compiled and binary files
+# Compiled and build artifacts
 *.o
 *.obj
+*.exe
+*.dll
+*.so
+*.a
 *.out
 
 # Dependencies
@@ -11,8 +15,6 @@ venv/
 __pycache__/
 .mypy_cache/
 .pytest_cache/
-dist/
-build/
 target/
 .gradle/
 
@@ -34,6 +36,11 @@ target/
 .DS_Store
 Thumbs.db
 
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
 # Compressed files
 *.zip
 *.gz
@@ -53,8 +60,4 @@ Thumbs.db
 *.Z
 *.lz
 *.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
 ```
