@@ -1,7 +1,11 @@
 ```
-# Compiled and binary files
+# Compiled and build artifacts
 *.o
 *.obj
+*.exe
+*.dll
+*.so
+*.a
 *.out
 
 # Dependencies
@@ -20,6 +24,7 @@ target/
 *.log
 *.tmp
 *.swp
+*.swo
 
 # Environment
 .env
@@ -33,6 +38,11 @@ target/
 # System files
 .DS_Store
 Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
 
 # Compressed files
 *.zip
